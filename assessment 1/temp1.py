@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
 plt.rcParams['axes.unicode_minus'] = False
 
-file_path = 'solar.csv'
+file_path = 'assessment 1/solar.csv' #Testing
 df = pd.read_csv(file_path)
 
 #Extract valid data columns
