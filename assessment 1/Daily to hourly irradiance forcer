@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Set the file path (assumes the file is in the same directory as the script) #
-file_path = '/Users/sandywedderburn/Library/Mobile Documents/com~apple~CloudDocs/University/Year 3/CMM3/solar_irradiance_forecast.csv'
+file_path = 'solar.csv'
 DUMMY_YEAR = 2024 # Used to help Python parse dates that are missing a year #
 
 # Read the raw data without a header for processing #
