@@ -1,3 +1,12 @@
+from scipy.optimize import brentq
+
+
+def production_for_area(A, T_amb_C=30.0, T_sky_C=20.0):
+    sol = run_simulation(A, T_amb_C, T_sky_C)
+    hourly_mass = compute_hourly_mass(sol, A)
+    return hourly_mass.sum()
+
+
 def find_area_for_target(target_mass=20.0, A_min=0.1, A_max=16.0):
     """Find area by brentq and plot bisector search trend."""
     def fA(A):
