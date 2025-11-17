@@ -1,0 +1,138 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+
+# CONFIGURATION
+
+PERCENTAGE_FILE = "hourly_percentage_irradiance.csv"
+TOTAL_IRRADIANCE = 3852       # Change for desired total daily irradiance
+POLY_ORDER = 3                 # Polynomial regression order
+DT_SEC = 60                    # Time resolution (s)
+
+
+# STEP 1 — Load Percentage Data
+
+def load_percentage_data(filepath):
+    """Load hourly percentage irradiance data."""
+    df = pd.read_csv(filepath)
+    if not {'Hour', 'Percentage of Daily Total'}.issubset(df.columns):
+        raise ValueError("CSV must contain columns: 'Hour' and 'Percentage of Daily Total'")
+    return df
+
+df_pct = load_percentage_data(PERCENTAGE_FILE)
+
+
+# STEP 2 — Compute Estimated Irradiance
+
+def compute_hourly_irradiance(df, total_irradiance):
+    """Apply total daily irradiance to percentage distribution."""
+    df = df.copy()
+    df["Estimated Irradiance (W/m2)"] = (df["Percentage of Daily Total"] / 100) * total_irradiance
+    df["Hour_float"] = df["Hour"].apply(lambda x: int(x.split(":")[0]) + int(x.split(":")[1]) / 60)
+    df = df.sort_values("Hour_float")
+    return df
+
+df_irr = compute_hourly_irradiance(df_pct, TOTAL_IRRADIANCE)
+
+print("\n" + "="*60)
+print(f"--- Hourly Irradiance Estimated from Total = {TOTAL_IRRADIANCE:.0f} W/m²·day ---")
+print("="*60)
+print(df_irr[["Hour", "Percentage of Daily Total", "Estimated Irradiance (W/m2)"]].to_string(index=False, float_format="%.2f"))
+
+
+# STEP 3 — Polynomial Regression
+
+def fit_polynomial(df, order):
+    """Fit polynomial to hourly irradiance data."""
+    x, y = df["Hour_float"].values, df["Estimated Irradiance (W/m2)"].values
+    coeffs = np.polyfit(x, y, order)
+    poly = np.poly1d(coeffs)
+
+    # Build readable equation
+    terms = []
+    for i, c in enumerate(coeffs):
+        pwr = order - i
+        c_str = f"{c:.3f}"
+        if pwr > 1:
+            terms.append(f"{c_str}·t^{pwr}")
+        elif pwr == 1:
+            terms.append(f"{c_str}·t")
+        else:
+            terms.append(f"{c_str}")
+    equation = " + ".join(terms)
+    return poly, coeffs, equation
+
+poly, coeffs, equation = fit_polynomial(df_irr, POLY_ORDER)
+
+print("\n" + "="*60)
+print(f"Polynomial Regression (Order {POLY_ORDER})")
+print("="*60)
+print(f"I(t) = {equation}")
+print("="*60)
+
+
+# STEP 4 — Plot Polynomial Fit
+
+def plot_polynomial(df, poly, order, equation, total_irradiance):
+    x = df["Hour_float"].values
+    y = df["Estimated Irradiance (W/m2)"].values
+    x_smooth = np.linspace(x.min(), x.max(), 300)
+    y_smooth = np.clip(poly(x_smooth), 0, None)
+
+    plt.figure(figsize=(10, 5))
+    plt.scatter(x, y, color='red', label='Hourly Estimated Irradiance')
+    plt.plot(x_smooth, y_smooth, 'b-', lw=2, label=f'{order}rd-order Polynomial Fit')
+    plt.text(x.min()+0.3, y.max()*0.75, f"I(t) = {equation}",
+             fontsize=10, color='blue', bbox=dict(facecolor='white', alpha=0.6))
+    plt.xlabel("Hour of Day")
+    plt.ylabel(r"Solar Irradiance (W/m$^2$)")
+    plt.title(f"Polynomial Fit of Estimated Irradiance (Total = {total_irradiance:.0f} W/m²·day)")
+    plt.legend()
+    plt.grid(True, alpha=0.4)
+    plt.tight_layout()
+    plt.show()
+
+plot_polynomial(df_irr, poly, POLY_ORDER, equation, TOTAL_IRRADIANCE)
+
+
+# STEP 5 — Generate Continuous Irradiance Function
+
+def build_irradiance_function(poly, df, dt_sec):
+    """Generate continuous irradiance vs. time function for simulations."""
+    x_smooth = np.linspace(df["Hour_float"].min(), df["Hour_float"].max(), 300)
+    y_smooth = np.clip(poly(x_smooth), 0, None)
+    interp_func = interp1d(x_smooth, y_smooth, kind='linear', bounds_error=False, fill_value=0)
+
+    t_hours = np.arange(df["Hour_float"].min(), df["Hour_float"].max(), dt_sec / 3600)
+    I_time = interp_func(t_hours)
+
+    return {
+        'coefficients': poly.coefficients,
+        'poly_function': poly,
+        'interp_function': interp_func,
+        'time_hours': t_hours,
+        'I_time': I_time
+    }
+
+irradiance_model = build_irradiance_function(poly, df_irr, DT_SEC)
+
+print(f"\n Polynomial irradiance model ready for use.")
+print(f" Hours covered: {df_irr['Hour_float'].min():.1f}–{df_irr['Hour_float'].max():.1f}")
+
+import json
+
+
+# STEP 7 — Save polynomial coefficients to file
+
+coeffs_dict = {
+    "order": POLY_ORDER,
+    "coefficients": coeffs.tolist(),
+    "equation": equation,
+    "total_irradiance": TOTAL_IRRADIANCE
+}
+
+with open("irradiance_model.json", "w") as f:
+    json.dump(coeffs_dict, f, indent=4)
+
+print("\n Polynomial coefficients saved to 'irradiance_model.json'")
