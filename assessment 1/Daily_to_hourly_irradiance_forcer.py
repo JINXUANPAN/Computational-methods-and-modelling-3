@@ -1,0 +1,148 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Set the file path (assumes the file is in the same directory as the script) #
+file_path = 'assessment 1/solar.csv'
+DUMMY_YEAR = 2024 # Used to help Python parse dates that are missing a year #
+
+# Read the raw data without a header for processing #
+df_raw = pd.read_csv(file_path, header=None)
+
+data_list = []
+current_date_str = None
+month_names = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+# Clean and extract historical solar data #
+print("Starting data extraction and cleaning...")
+
+for index, row in df_raw.iterrows():
+    col_a = row.iloc[0]
+    col_b = row.iloc[1]
+
+    # Date Detection #
+    if pd.notna(col_a) and isinstance(col_a, str):
+        if any(month in col_a for month in month_names):
+            current_date_str = col_a.split(',')[0].strip()
+            continue
+
+    # Data Row Detection #
+    if current_date_str and pd.notna(col_a) and isinstance(col_a, str) and ':' in col_a:
+        try:
+            irradiance = pd.to_numeric(col_b, errors='coerce')
+            if pd.notna(irradiance):
+                datetime_str = f"{current_date_str} {DUMMY_YEAR} {col_a}"
+                data_list.append({
+                    'DateTime': datetime_str,
+                    'Solar_Irradiance_W_m2': irradiance
+                })
+        except:
+            continue
+
+# Create the final cleaned database #
+df_cleaned = pd.DataFrame(data_list)
+
+if df_cleaned.empty:
+    print("Error: No solar irradiance data was extracted. Check the CSV format.")
+    # Exit or raise error, as subsequent steps will fail without data
+    exit()
+
+# Final database preparations #
+date_format = '%A %B %d %Y %H:%M'
+df_cleaned['DateTime'] = pd.to_datetime(df_cleaned['DateTime'], format=date_format, errors='coerce')
+df_forecast = df_cleaned.set_index('DateTime')
+df_forecast = df_forecast[df_forecast.index.notna()]
+df_forecast = df_forecast.sort_index()
+
+# Sort hours by time #
+def time_to_seconds(time_str):
+    h, m = map(int, time_str.split(':'))
+    return h * 3600 + m * 60
+
+# Calculate Hourly Average and Percentage Distribution #
+df_forecast['Hour_of_Day'] = df_forecast.index.strftime('%H:%M')
+df_hourly_avg = df_forecast.groupby('Hour_of_Day')['Solar_Irradiance_W_m2'].mean().reset_index()
+df_hourly_avg.columns = ['Hour', 'Average Irradiance (W/m2)']
+
+# Sort table #
+df_hourly_avg = df_hourly_avg.assign(Time_Sort=df_hourly_avg['Hour'].apply(time_to_seconds))
+df_hourly_avg = df_hourly_avg.sort_values('Time_Sort').drop(columns=['Time_Sort'])
+
+# Calculate Percentage of Daily Total #
+total_daily_avg = df_hourly_avg['Average Irradiance (W/m2)'].sum()
+df_hourly_avg['Percentage of Daily Total'] = (df_hourly_avg['Average Irradiance (W/m2)'] / total_daily_avg) * 100
+
+
+
+
+
+
+# 🛑 CHANGE THIS VALUE 🛑 to the input total daily irradiance 
+DAILY_TOTAL = 4000 # Example: 4000 W/m2 total for the day
+
+
+
+
+
+
+
+# Create a new column applying the percentage distribution #
+df_hourly_avg['Estimated Irradiance (W/m2)'] = (df_hourly_avg['Percentage of Daily Total'] / 100) * DAILY_TOTAL
+
+# Display the estimated results
+print("\n" + "="*60)
+print(f"--- Hourly Irradiance Estimated from a Daily Total of {DAILY_TOTAL:.2f} W/m2 ---")
+print("="*60)
+print(df_hourly_avg[['Hour', 'Percentage of Daily Total', 'Estimated Irradiance (W/m2)']].to_string(index=False, float_format='%.2f'))
+print("="*60)
+
+
+# Plot Function #
+def create_bar_plot(df, value_col, title, ylabel, filename, color):
+    plt.figure(figsize=(10, 6))
+    plt.bar(df['Hour'], df[value_col], color=color)
+    plt.xlabel('Hour of Day')
+    plt.ylabel(ylabel)
+    plt.title(title)
+
+    hours = df['Hour'].tolist()
+    tick_indices = range(0, len(hours), 2)
+    tick_labels = [hours[i] for i in tick_indices]
+
+    plt.xticks(tick_indices, tick_labels, rotation=45, ha='right')
+    if '%' in ylabel:
+        plt.yticks(np.arange(0, df[value_col].max() + 5, 5))
+
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig(filename)
+    print(f"Plot saved as: {filename}")
+
+
+# Generate CSV Files and Plots #
+
+# Save Average Irradiance #
+df_hourly_avg[['Hour', 'Average Irradiance (W/m2)']].to_csv('hourly_average_irradiance.csv', index=False)
+
+# Save Percentage Irradiance #
+df_hourly_avg[['Hour', 'Percentage of Daily Total']].to_csv('hourly_percentage_irradiance.csv', index=False)
+
+# Plot 1: Average Irradiance #
+create_bar_plot(
+    df_hourly_avg,
+    'Average Irradiance (W/m2)',
+    'Historical Average Hourly Solar Irradiance Forecast',
+    'Average Solar Irradiance ($W/m^2$)',
+    'average_hourly_irradiance_plot.png',
+    '#3498db')
+
+# Plot 2: Percentage of Daily Total #
+create_bar_plot(
+    df_hourly_avg,
+    'Percentage of Daily Total',
+    'Percentage of Daily Average Irradiance by Hour',
+    'Percentage of Daily Average Irradiance (%)',
+    'hourly_percentage_irradiance_plot.png',
+    '#2ecc71')
+
+print("\nScript completed. CSV and PNG files saved.")
