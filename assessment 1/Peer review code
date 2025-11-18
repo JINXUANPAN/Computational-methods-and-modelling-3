@@ -1,0 +1,280 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Nov 11 13:02:15 2025
+
+@author: Administrator
+"""
+# Importing libraries used 
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp
+
+# Font configuration - fallback to DejaVu Sans if Microsoft YaHei not available
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'DejaVu Sans', 'Arial']
+plt.rcParams['axes.unicode_minus'] = False
+
+# Loading solar irradiance data from CSV file
+file_path = 'assessment 1/solar.csv' 
+df = pd.read_csv(file_path)
+
+data = df.iloc[1:, [0, 1]].copy()
+data.columns = ["Hour", "Solar_Irradiance"]
+
+# Cleaning Data
+data = data.dropna()
+data = data[data["Hour"].str.contains(":")]
+
+data["Solar_Irradiance"] = pd.to_numeric(data["Solar_Irradiance"], errors="coerce")
+data = data.dropna()
+
+data["Hour"] = data["Hour"].str.replace(":00", "").astype(float)
+data = data.groupby("Hour", as_index=False).mean().sort_values("Hour")
+
+# ================================================================================================================
+# REGRESSION MODEL (INTERPOLATING DATA TO FORM CONTINUOUS FUNCTION)
+# ================================================================================================================
+
+x = data["Hour"].values
+y = data["Solar_Irradiance"].values
+
+# 3rd-order polynomial regression
+coeffs = np.polyfit(x, y, 3)
+poly_func = np.poly1d(coeffs)
+
+x_smooth = np.linspace(x.min(), x.max(), 300)
+y_smooth = poly_func(x_smooth)
+
+print("polynomial regression：")
+print(f"y = {coeffs[0]:.3f}x³ + {coeffs[1]:.3f}x² + {coeffs[2]:.3f}x + {coeffs[3]:.3f}")
+print("average solar irradiance =", np.mean(np.clip(y_smooth, 0, None)))
+print("Maximum solar irradiance =", np.max(y_smooth))
+
+# Plotting regression curve
+plt.figure(figsize=(10, 6))
+plt.scatter(x, y, color='red', label="original data")
+plt.plot(x_smooth, y_smooth, color='blue', label="polynomial regression curve")
+equation_text = f"y = {coeffs[0]:.2f}x³ + {coeffs[1]:.2f}x² + {coeffs[2]:.2f}x + {coeffs[3]:.2f}"
+plt.text(x.min()+0.3, y.max()*0.8, equation_text, color="blue", fontsize=12)
+plt.xlabel("Hour")
+plt.ylabel(r"Solar Irradiance (W/m$^2$)")
+plt.title("smooth function")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# ================================================================================================================
+# ODE MODEL: SOLAR STILL DYNAMICS
+# ================================================================================================================
+
+# Solar irradiance function from regression
+def G_t_from_regression(t, scale_factor=2.0):
+    hour = (t / 3600.0) % 24
+    G = poly_func(hour)
+    G = max(G, 0.0)
+    return G * scale_factor
+
+# System parameters
+def default_parameters():
+    params = {
+        "A": 1.0,           # Surface area (m²)
+        "m_w": 20.0,        # Mass of water (kg)
+        "c_p_w": 4184,      # Specific heat capacity of water (J/kg·K)
+        "m_g": 1.0,         # Mass of glass (kg)
+        "c_p_g": 800,       # Specific heat capacity of glass (J/kg·K)
+        "h_wg": 18.0,       # Heat transfer coefficient water-glass (W/m²·K)
+        "h_ga": 20.0,       # Heat transfer coefficient glass-ambient (W/m²·K)
+        "epsilon_g": 0.9,   # Emissivity of glass
+        "sigma": 5.67e-8,   # Stefan-Boltzmann constant (W/m²·K⁴)
+        "k_m": 2e-4,        # Mass transfer coefficient (m/s)
+        "L_v": 2.45e6,      # Latent heat of vaporization (J/kg)
+        "eta_coll": 0.8,    # Collection efficiency
+        "T_amb": 298.0,     # Ambient temperature (K)
+        "RH": 0.6,          # Relative humidity
+        "alpha": 0.9,       # Solar absorptivity of water
+        "G_t": 800.0,
+    }
+    return params
+
+# Saturation pressure (Antoine equation)
+def p_sat(T):
+    T = np.clip(T, 273.0, 373.0)
+    return 610.78 * np.exp((17.27 * (T - 273.15)) / (T - 35.85))
+
+# Evaporation flux
+def evaporation_flux(Tw, Tg, A, k_m, RH):
+    Mw = 0.01801528  # Molar mass of water (kg/mol)
+    R = 8.314        # Gas constant (J/mol·K)
+    T_avg = max((Tw + Tg) / 2.0, 273.0)
+    delta_p = max(p_sat(Tw) - RH * p_sat(Tg), 0.0)
+    m_dot_per_m2 = k_m * Mw * delta_p / (R * T_avg)
+    return A * m_dot_per_m2
+
+def solar_absorbed(params, t):
+    G_t = G_t_from_regression(t)
+    return params["A"] * params["alpha"] * G_t
+
+def Q_wg(Tw, Tg, params):
+    return params["h_wg"] * params["A"] * (Tw - Tg)
+
+def Q_gamb(Tg, params):
+    conv = params["h_ga"] * params["A"] * (Tg - params["T_amb"])
+    rad = params["epsilon_g"] * params["sigma"] * params["A"] * (Tg**4 - params["T_amb"]**4)
+    return conv + rad
+
+# System of ODEs: dTw/dt, dTg/dt, dM_col/dt
+def solar_still_odes(t, y, params):
+    Tw, Tg, M_col = y
+    Cw = params["m_w"] * params["c_p_w"]
+    Cg = params["m_g"] * params["c_p_g"]
+    Lv = params["L_v"]
+    eta_coll = params["eta_coll"]
+
+    Q_solar = solar_absorbed(params, t)
+    Q_wg_val = Q_wg(Tw, Tg, params)
+    Q_gamb_val = Q_gamb(Tg, params)
+    m_evap = evaporation_flux(Tw, Tg, params['A'], params['k_m'], params['RH'])
+
+    # Energy balances
+    dTw_dt = (Q_solar - Q_wg_val - m_evap * Lv) / Cw
+    dTg_dt = (Q_wg_val - Q_gamb_val + eta_coll * m_evap * Lv) / Cg
+    dMcol_dt = eta_coll * m_evap
+
+    return [dTw_dt, dTg_dt, dMcol_dt]
+
+# Run simulation using RK45 solver
+def run_simulation(params=None, t_span=(0, 3600 * 24), y0=None):
+    if params is None:
+        params = default_parameters()
+    if y0 is None:
+        y0 = [303.0, 298.0, 0.0]  # Initial: Tw=30°C, Tg=25°C, M_col=0
+
+    sol = solve_ivp(
+        solar_still_odes,
+        t_span=t_span,
+        y0=y0,
+        args=(params,),
+        method="RK45",
+        max_step=60.0,
+        dense_output=True
+    )
+    return sol
+
+# ================================================================================================================
+# SIMULATION & VISUALIZATION
+# ================================================================================================================
+
+if __name__ == "__main__":
+    params = default_parameters()
+    result = run_simulation(params, t_span=(0, 3600 * 24))
+
+    Tw, Tg, M_col = result.y
+    t_hours = result.t / 3600
+    A = params["A"]
+
+    avg_Tw = np.mean(Tw - 273.15)
+    avg_Tg = np.mean(Tg - 273.15)
+    total_kg = M_col[-1]
+    per_m2_day = total_kg / A
+
+    print("\n" + "="*60)
+    print("SIMULATION RESULTS")
+    print("="*60)
+    print(f"Average water temperature (°C): {avg_Tw:.2f}")
+    print(f"Average glass temperature (°C): {avg_Tg:.2f}")
+    print(f"Collected water total (kg/day): {total_kg:.3f}")
+    print(f"Collected water (kg/m²·day): {per_m2_day:.3f}")
+    print("="*60 + "\n")
+
+    # Figure 1: Temperature profiles
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+    
+    ax1.plot(t_hours, Tw - 273.15, 'r-', label='Water Temperature', linewidth=2)
+    ax1.plot(t_hours, Tg - 273.15, 'b-', label='Glass Temperature', linewidth=2)
+    ax1.axhline(y=params["T_amb"] - 273.15, color='green', linestyle='--', 
+                label='Ambient Temperature', linewidth=1.5)
+    ax1.set_xlabel('Time (hours)', fontsize=12)
+    ax1.set_ylabel('Temperature (°C)', fontsize=12)
+    ax1.set_title('Temperature Profiles Over 24 Hours', fontsize=14, fontweight='bold')
+    ax1.legend(loc='best', fontsize=10)
+    ax1.grid(True, alpha=0.3)
+    ax1.set_xlim([0, 24])
+    
+    ax2.plot(t_hours, M_col, 'purple', linewidth=2)
+    ax2.set_xlabel('Time (hours)', fontsize=12)
+    ax2.set_ylabel('Cumulative Water Collected (kg)', fontsize=12)
+    ax2.set_title('Cumulative Water Collection Over 24 Hours', fontsize=14, fontweight='bold')
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xlim([0, 24])
+    ax2.fill_between(t_hours, M_col, alpha=0.3, color='purple')
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Figure 2: Solar irradiance and heat fluxes
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+    
+    G_values = [G_t_from_regression(t * 3600) for t in t_hours]
+    
+    ax1.plot(t_hours, G_values, 'orange', linewidth=2)
+    ax1.set_xlabel('Time (hours)', fontsize=12)
+    ax1.set_ylabel('Solar Irradiance (W/m²)', fontsize=12)
+    ax1.set_title('Solar Irradiance Over 24 Hours', fontsize=14, fontweight='bold')
+    ax1.grid(True, alpha=0.3)
+    ax1.set_xlim([0, 24])
+    ax1.fill_between(t_hours, G_values, alpha=0.3, color='orange')
+    
+    Q_solar_values = [solar_absorbed(params, t) for t in result.t]
+    Q_wg_values = [Q_wg(Tw[i], Tg[i], params) for i in range(len(result.t))]
+    Q_gamb_values = [Q_gamb(Tg[i], params) for i in range(len(result.t))]
+    
+    ax2.plot(t_hours, Q_solar_values, 'orange', label='Solar Absorbed', linewidth=2)
+    ax2.plot(t_hours, Q_wg_values, 'red', label='Water→Glass', linewidth=2)
+    ax2.plot(t_hours, Q_gamb_values, 'blue', label='Glass→Ambient', linewidth=2)
+    ax2.set_xlabel('Time (hours)', fontsize=12)
+    ax2.set_ylabel('Heat Flux (W)', fontsize=12)
+    ax2.set_title('Heat Fluxes Over 24 Hours', fontsize=14, fontweight='bold')
+    ax2.legend(loc='best', fontsize=10)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xlim([0, 24])
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Figure 3: Water collection rate
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    evap_flux = [evaporation_flux(Tw[i], Tg[i], params['A'], params['k_m'], params['RH']) 
+                 for i in range(len(result.t))]
+    collection_rate = [params['eta_coll'] * ef * 3600 for ef in evap_flux]
+    
+    ax.plot(t_hours, collection_rate, 'cyan', linewidth=2)
+    ax.set_xlabel('Time (hours)', fontsize=12)
+    ax.set_ylabel('Water Collection Rate (kg/hour)', fontsize=12)
+    ax.set_title('Instantaneous Water Collection Rate Over 24 Hours', 
+                 fontsize=14, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim([0, 24])
+    ax.fill_between(t_hours, collection_rate, alpha=0.3, color='cyan')
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Figure 4: Temperature differences
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    delta_T_wg = Tw - Tg
+    delta_T_gamb = Tg - params["T_amb"]
+    
+    ax.plot(t_hours, delta_T_wg, 'red', label='ΔT (Water - Glass)', linewidth=2)
+    ax.plot(t_hours, delta_T_gamb, 'blue', label='ΔT (Glass - Ambient)', linewidth=2)
+    ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+    ax.set_xlabel('Time (hours)', fontsize=12)
+    ax.set_ylabel('Temperature Difference (K)', fontsize=12)
+    ax.set_title('Temperature Differences Over 24 Hours', fontsize=14, fontweight='bold')
+    ax.legend(loc='best', fontsize=10)
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim([0, 24])
+    
+    plt.tight_layout()
+    plt.show()

@@ -1,0 +1,49 @@
+from scipy.optimize import brentq
+
+
+def production_for_area(A, T_amb_C=30.0, T_sky_C=20.0):
+    sol = run_simulation(A, T_amb_C, T_sky_C)
+    hourly_mass = compute_hourly_mass(sol, A)
+    return hourly_mass.sum()
+
+
+def find_area_for_target(target_mass=20.0, A_min=0.1, A_max=16.0):
+    """Find area by brentq and plot bisector search trend."""
+    def fA(A):
+        return production_for_area(A) - target_mass
+
+    print(f"Searching for area producing {target_mass} kg/day")
+
+    # --- record trial points for plotting ---
+    trial_As = np.linspace(A_min, A_max, 10)
+    trial_Ms = [production_for_area(A) for A in trial_As]
+
+    try:
+        A_root = brentq(fA, A_min, A_max, xtol=1e-3, rtol=1e-3)
+    except Exception as e:
+        print("Brent search failed:", e)
+        A_root = np.nan
+
+    # --- plot bisector-style diagram ---
+    plt.figure(figsize=(7, 4))
+    plt.plot(trial_As, trial_Ms, "o-", label="Simulated mass output")
+    plt.axhline(target_mass, color="r", linestyle="--", label="Target mass")
+    if np.isfinite(A_root):
+        plt.axvline(A_root, color="g", linestyle=":", label=f"A_opt = {A_root:.2f} m²")
+    plt.xlabel("Still Area (m²)")
+    plt.ylabel("Daily water yield (kg)")
+    plt.title("Bisector / Area Optimisation Plot")
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+    if np.isfinite(A_root):
+        mass = production_for_area(A_root)
+        print(f"→ Found A = {A_root:.3f} m² producing {mass:.3f} kg")
+        return A_root, mass
+    return None, None
+
+
+A_needed, mass = find_area_for_target(20.0)
+if A_needed:
+        print(f"Required area ≈ {A_needed:.3f} m² → {mass:.3f} kg/day")

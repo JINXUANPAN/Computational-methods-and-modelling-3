@@ -155,3 +155,9 @@ if __name__ == "__main__":
     print("Final water temperature (C):", Tw[-1] - 273.15)
     print("Final glass temperature (C):", Tg[-1] - 273.15)
     print("Collected water (kg):", M_col[-1])
+
+# SW PEER REVIEW #
+# All looks very good, there is very little I can find to fault it. If there was anything to suggest, it would be to add additional info in comments where the default parameters #
+# are being defined, explaining the units as without context the units may be a bit unclear (to the person marking etc). [Lines 61-89] #
+# Only other thing- may just be my lack of understanding but at line 97, does  """return min(flux, 0.05)""" not limit the max flux to 0.05? I may just not be understanding something tbf #
+
