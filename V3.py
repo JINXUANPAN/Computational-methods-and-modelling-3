@@ -1,16 +1,19 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Solar Still Simulation Framework (Based on Vasava et al., 2023)
+Created on Mon Nov 17 15:44:52 2025
 
-This module implements a mathematical model of a solar still derived from the 
-equations in Vasava et al. (2023). Users can input local climate data and 
-system design targets, and the model computes the expected freshwater output. 
-The structure is intentionally general so the model can be applied to various 
-climates and output requirements.
+@author: matiaslander
+"""
 
-Note: safeguards are included to prevent division by zero errors in calculations. 
-Although these cases are unlikely in practical scenarios, they ensure numerical stability.
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Nov 11 13:02:15 2025
 
-THIS IS THE BLANK VERSION - Ready for custom temperature input methods
+Solar Still Model - Based on Vasava et al. (2023)
+Mathematical modelling matching paper equations with area optimization
+
+@author: Administrator
 """
 
 # Importing libraries used 
@@ -20,16 +23,20 @@ import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 from scipy.optimize import brentq
 
+# Font configuration
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'DejaVu Sans', 'Arial']
+plt.rcParams['axes.unicode_minus'] = False
+
 # =============================================================================
 # PHYSICAL CONSTANTS AND GLOBAL PARAMETERS
 # =============================================================================
 
-# Physical constants
-WATER_DEPTH = 0.02              # m (20 mm) - from paper
-GLASS_THICKNESS = 0.004         # m (4 mm) - from paper
+# Physical constants - mostly lifted from basis paper in .zip 
+WATER_DEPTH = 0.02              # m (20 mm) 
+GLASS_THICKNESS = 0.004         # m (4 mm) 
 RHO_WATER = 1000.0              # kg/m³
 RHO_GLASS = 2500.0              # kg/m³
-C_P_WATER = 4200.0              # J/(kg·K) - paper value
+C_P_WATER = 4200.0              # J/(kg·K) 
 C_P_GLASS = 750.0               # J/(kg·K)
 EPSILON_W = 0.95                # Water emissivity
 EPSILON_G = 0.90                # Glass emissivity
@@ -39,18 +46,13 @@ ALPHA_WATER = 0.85              # Basin absorptivity
 ALPHA_GLASS = 0.05              # Glass absorptivity
 TAU_GLASS = 0.90                # Glass transmittance
 H_GA = 5.0                      # Convective glass-air (W/m²·K)
-ETA_COLL = 1.00                 # Collection efficiency
+ETA_COLL = 0.80                 # Collection efficiency
 
 DT_SEC = 60                     # Timestep (s)
-POLY_ORDER = 3                  # Polynomial regression order
 
-# Environmental conditions - CONSTANT TEMPERATURE VERSION
-T_AMB_C = 30.0                  # Ambient temperature (°C) - CONSTANT
-T_SKY_C = 5.0                   # Sky temperature (°C) - CONSTANT (25K below ambient)
-
-# Configuration
-PERCENTAGE_FILE = "hourly_percentage_irradiance.csv"
-TOTAL_IRRADIANCE = 3852         # Total daily irradiance (W/m²·day)
+# Environmental conditions
+T_AMB_C = 30.0                  # Ambient temperature (°C)
+T_SKY_C = 20.0                  # Sky temperature (°C)
 
 # Globals to hold time and irradiance arrays
 t_seconds = None
@@ -58,47 +60,31 @@ t_hours = None
 G_time = None
 t_start_hr = None
 t_end_hr = None
-poly_func = None
 
 # =============================================================================
 # LOADING AND PREPROCESSING SOLAR IRRADIANCE DATA
 # =============================================================================
 
-def load_percentage_data(filepath):
-    """Load hourly percentage irradiance data from preprocessed CSV."""
-    df = pd.read_csv(filepath)
-    if not {'Hour', 'Percentage of Daily Total'}.issubset(df.columns):
-        raise ValueError("CSV must contain columns: 'Hour' and 'Percentage of Daily Total'")
-    return df
+file_path = 'assessment 1/solar.csv' 
+df = pd.read_csv(file_path)
 
-def compute_hourly_irradiance(df, total_irradiance):
-    """Apply total daily irradiance to percentage distribution."""
-    df = df.copy()
-    df["Estimated Irradiance (W/m2)"] = (df["Percentage of Daily Total"] / 100) * total_irradiance
-    df["Hour_float"] = df["Hour"].apply(lambda x: int(x.split(":")[0]) + int(x.split(":")[1]) / 60)
-    df = df.sort_values("Hour_float")
-    return df
+data = df.iloc[1:, [0, 1]].copy()
+data.columns = ["Hour", "Solar_Irradiance"]
 
-# Load percentage data
-print("\n" + "="*60)
-print("Loading preprocessed irradiance data...")
-print("="*60)
-
-df_pct = load_percentage_data(PERCENTAGE_FILE)
-df_irr = compute_hourly_irradiance(df_pct, TOTAL_IRRADIANCE)
-
-print(f"\nHourly Irradiance Estimated from Total = {TOTAL_IRRADIANCE:.0f} W/m²·day")
-print("="*60)
-print(df_irr[["Hour", "Percentage of Daily Total", "Estimated Irradiance (W/m2)"]].to_string(index=False, float_format="%.2f"))
-print("="*60)
+# Cleaning Data
+data = data.dropna()
+data = data[data["Hour"].str.contains(":")]
+data["Solar_Irradiance"] = pd.to_numeric(data["Solar_Irradiance"], errors="coerce")
+data = data.dropna()
+data["Hour"] = data["Hour"].str.replace(":00", "").astype(float)
+data = data.groupby("Hour", as_index=False).mean().sort_values("Hour")
 
 # =============================================================================
 # REGRESSION MODEL (INTERPOLATING DATA TO FORM CONTINUOUS FUNCTION)
 # =============================================================================
 
-# loading data from CSV file
-x = df_irr["Hour_float"].values
-y = df_irr["Estimated Irradiance (W/m2)"].values
+x = data["Hour"].values
+y = data["Solar_Irradiance"].values
 
 # 3rd-order polynomial regression
 coeffs = np.polyfit(x, y, 3)
@@ -125,7 +111,7 @@ plt.ylabel(r"Solar Irradiance (W/m$^2$)")
 plt.title("Continuous irradiance function using regression model")
 plt.legend()
 plt.grid(True)
-plt.show(block=False)  # Non-blocking: allows script to continue
+plt.show()
 
 # Initialize time arrays for simulation
 t_start_hr = x.min()
@@ -135,13 +121,6 @@ t_seconds = t_hours * 3600.0
 G_time = np.clip(poly_func(t_hours), 0.0, None)
 
 print(f"Simulation window: {t_start_hr:.1f}h - {t_end_hr:.1f}h")
-
-print("\n" + "="*60)
-print("Temperature: CONSTANT")
-print("="*60)
-print(f"Ambient Temperature: {T_AMB_C:.2f}°C")
-print(f"Sky Temperature:     {T_SKY_C:.2f}°C")
-print("="*60)
 
 # =============================================================================
 # ODE MODEL: SOLAR STILL DYNAMICS (BASED ON PAPER EQUATIONS)
@@ -161,19 +140,18 @@ def epsilon_eff():
     """ε_eff = 1 / (1/ε_w + 1/ε_g - 1)"""
     return 1.0 / (1.0/EPSILON_W + 1.0/EPSILON_G - 1.0)
 
-# Radiative heat transfer coefficient (Paper's Equation 4 - equivalent Kelvin values 
-# introduced for simplicity when using Stefan-Boltzmann)
+# Radiative heat transfer coefficient (Paper's Equation 4)
 def h_r_wg(Tw_C, Tg_C):
     """
-    h_r,w-g = ε_eff × σ[(T_w+273)² + (T_g+273)²] × [(T_w + T_g + 546)]
+    h_r,w-g = ε_eff × σ × [(T_w+273)² + (T_g+273)²] × [(T_w + T_g + 546)]
     """
-    Tw_K = Tw_C + 273
-    Tg_K = Tg_C + 273
+    Tw_K = Tw_C + 273.15
+    Tg_K = Tg_C + 273.15
     eps_eff_val = epsilon_eff()
     h_r = eps_eff_val * SIGMA * (Tw_K**2 + Tg_K**2) * (Tw_K + Tg_K)
     return h_r
 
-# Helper function for signed cube root (to handle negative values)
+# Helper function for signed cube root
 def signed_cuberoot(x):
     """Returns signed cube root to handle negative temperature differences"""
     return np.sign(x) * (np.abs(x) ** (1.0/3.0))
@@ -183,15 +161,18 @@ def h_c_wg(Tw_C, Tg_C):
     """
     h_c,w-g = 0.884 × [(T_w - T_g) + (P_w - P_g)×(T_w+273)/(2.723×10⁴ - P_w)]^(1/3)
     """
-    if Tw_C <= Tg_C: # No convection if water temp <= glass temp
+    if Tw_C <= Tg_C:
         return 0.1, p_sat(Tw_C), p_sat(Tg_C)
     
     P_w = p_sat(Tw_C)
     P_g = p_sat(Tg_C)
     
     term1 = Tw_C - Tg_C
-    term2 = (P_w - P_g) * (Tw_C + 273) / (2.7230e4 - P_w + 1e-9) # Avoid division by zero
+    term2 = (P_w - P_g) * (Tw_C + 273.15) / (268900.0 - P_w + 1e-9)
     combined = term1 + term2
+    
+    if combined <= 0:
+        return 0.1, P_w, P_g
     
     h_c = 0.884 * signed_cuberoot(combined)
     return max(h_c, 0.1), P_w, P_g
@@ -201,27 +182,19 @@ def h_e_wg(Tw_C, Tg_C, h_c, P_w, P_g):
     """
     h_e,w-g = 16.273×10⁻³ × h_c × (P_w - P_g)/(T_w - T_g)
     """
-    if abs(Tw_C - Tg_C) < 1e-6: # Avoid division by zero
+    if abs(Tw_C - Tg_C) < 1e-6:
         return 0.0
     h_e = 16.273e-3 * h_c * (P_w - P_g) / (Tw_C - Tg_C)
-    return max(h_e, 0.0) # Ensure non-negative
+    return max(h_e, 0.0)
 
 # System of ODEs (Paper's Equation 1 and 2)
 def solar_still_odes(t_sec, y, A):
     """
-    Energy balance equations from paper (Equations 1 and 2):
+    Energy balance equations from paper:
     
-    Water basin:  M_w × C_w × dT_w/dt = α_w×τ_g×I(t) - Q_r,w-g - Q_c,w-g - Q_e,w-g
-    
-    Glass cover:  M_g × C_g × dT_g/dt = α_g×I(t) + Q_r,w-g + Q_c,w-g + Q_e,w-g 
-                                        - Q_r,g-a - Q_c,g-a
-    
-    Where:
-        Q_r,w-g = h_r,w-g × A × (T_w - T_g)     [Radiative heat transfer, water to glass]
-        Q_c,w-g = h_c,w-g × A × (T_w - T_g)     [Convective heat transfer, water to glass]
-        Q_e,w-g = h_e,w-g × A × (T_w - T_g)     [Evaporative heat transfer, water to glass]
-        Q_r,g-a = ε_g×σ×A×(T_g⁴ - T_sky⁴)       [Radiative heat loss, glass to sky]
-        Q_c,g-a = h_c,g-a × A × (T_g - T_a)     [Convective heat loss, glass to ambient]
+    Equation 2 (Water): M_w × C_w × dT_w/dt = I(t)×τ×α - Q_evap - Q_rad - Q_conv
+    Equation 1 (Glass): M_g × C_g × dT_g/dt = I(t)×α_g + η×Q_evap + Q_rad + Q_conv 
+                                               - Q_rad_sky - Q_conv_amb
     """
     Tw_C, Tg_C, M_col = y  # Temperatures in Celsius
     
@@ -234,12 +207,7 @@ def solar_still_odes(t_sec, y, A):
     idx = np.clip(idx, 0, len(G_time) - 1)
     G_current = G_time[idx]
     
-    # Use constant temperatures
-    T_amb_current = T_AMB_C
-    T_sky_current = T_SKY_C
-    
     # Calculate masses based on area (generalizable for optimization)
-    # Note: area is considered equal for water and glass layers, as difference is considered negligible
     m_water = RHO_WATER * WATER_DEPTH * A
     m_glass = RHO_GLASS * GLASS_THICKNESS * A
     
@@ -252,34 +220,29 @@ def solar_still_odes(t_sec, y, A):
     h_c, P_w, P_g = h_c_wg(Tw_C, Tg_C)
     h_e = h_e_wg(Tw_C, Tg_C, h_c, P_w, P_g)
     
-    # Temperature differences
-    delta_Tw_Tg = Tw_C - Tg_C  # Water to glass
-    delta_Tg_Ta = Tg_C - T_amb_current  # Glass to ambient
+    # Heat fluxes (W)
+    Q_solar_water = TAU_GLASS * ALPHA_WATER * G_current * A
+    Q_solar_glass = ALPHA_GLASS * G_current * A
+    Q_evap = h_e * A * (Tw_C - Tg_C)
+    Q_conv = h_c * A * (Tw_C - Tg_C)
+    Q_rad = h_r * A * (Tw_C - Tg_C)
     
-    # Solar absorption (W)
-    Q_solar_water = TAU_GLASS * ALPHA_WATER * G_current * A  # Solar reaching water through glass
-    Q_solar_glass = ALPHA_GLASS * G_current * A  # Solar absorbed by glass itself
+    # Glass to environment heat losses
+    Tw_K = Tw_C + 273.15
+    Tg_K = Tg_C + 273.15
+    T_amb_K = T_AMB_C + 273.15
+    T_sky_K = T_SKY_C + 273.15
     
-    # Heat transfers between water and glass (W) - using paper's sign convention
-    Q_rad_wg = h_r * A * delta_Tw_Tg
-    Q_conv_wg = h_c * A * delta_Tw_Tg
-    Q_evap_wg = h_e * A * delta_Tw_Tg
-    
-    # Glass to environment losses (W) - using full Stefan-Boltzmann as in paper
-    Tg_K = Tg_C + 273
-    Tsky_K = T_sky_current + 273
-    Q_rad_sky = EPSILON_G * SIGMA * A * (Tg_K**4 - Tsky_K**4)  # Radiative loss to sky
-    Q_conv_amb = H_GA * A * delta_Tg_Ta  # Convective loss to ambient air
+    Q_rad_sky = EPSILON_G * SIGMA * A * (Tg_K**4 - T_sky_K**4)
+    Q_conv_amb = H_GA * A * (Tg_C - T_AMB_C)
     
     # Energy balances (Paper's Eq. 1 and 2)
-    # Water: gains solar, loses to glass via radiation, convection, evaporation
-    dTw_dt = (Q_solar_water - Q_rad_wg - Q_conv_wg - Q_evap_wg) / Cw
+    dTw_dt = (Q_solar_water - Q_evap - Q_rad - Q_conv) / Cw
+    dTg_dt = (Q_solar_glass + ETA_COLL * Q_evap + Q_rad + Q_conv 
+              - Q_rad_sky - Q_conv_amb) / Cg
     
-    # Glass: gains solar + heat from water, loses to ambient via radiation and convection
-    dTg_dt = (Q_solar_glass + Q_rad_wg + Q_conv_wg + Q_evap_wg - Q_rad_sky - Q_conv_amb) / Cg
-    
-    # Water collection rate (kg/s)
-    m_dot = Q_evap_wg / L_V
+    # Water collection rate (Equation 11)
+    m_dot = Q_evap / L_V
     dMcol_dt = ETA_COLL * max(m_dot, 0.0)
     
     return [dTw_dt, dTg_dt, dMcol_dt]
@@ -288,7 +251,7 @@ def solar_still_odes(t_sec, y, A):
 def run_simulation(basin_area=1.0):
     """Execute simulation for given basin area"""
     if G_time is None:
-        raise RuntimeError("Irradiance profile not loaded")
+        raise RuntimeError("Irradiance not loaded")
     
     # Initial conditions: start at ambient temperature
     T_initial = T_AMB_C
@@ -350,7 +313,7 @@ def find_area_for_target(target_mass=20.0, A_min=0.1, A_max=30.0):
     plt.grid(True, alpha=0.3)
     plt.legend(fontsize=11)
     plt.tight_layout()
-    plt.show(block=False)  # Non-blocking: allows script to continue
+    plt.show()
     
     print(f"Found optimal area: {A_optimal:.3f} m² producing {mass_actual:.3f} kg/day")
     return A_optimal, mass_actual
@@ -369,8 +332,8 @@ def plot_results(sol, basin_area):
     
     ax1.plot(t_hours_plot, Tw_C, 'r-', label='Water Temperature', linewidth=2)
     ax1.plot(t_hours_plot, Tg_C, 'b-', label='Glass Temperature', linewidth=2)
-    ax1.axhline(y=T_AMB_C, color='g', linestyle='--', label='Ambient Temperature', linewidth=1.5)
-    ax1.axhline(y=T_SKY_C, color='c', linestyle=':', label='Sky Temperature', linewidth=1.5)
+    ax1.axhline(y=T_AMB_C, color='green', linestyle='--', 
+                label='Ambient Temperature', linewidth=1.5)
     ax1.set_xlabel('Time (hours)', fontsize=12)
     ax1.set_ylabel('Temperature (°C)', fontsize=12)
     ax1.set_title(f'Temperature Profiles (A = {basin_area:.2f} m²)', fontsize=14, fontweight='bold')
@@ -387,7 +350,7 @@ def plot_results(sol, basin_area):
     ax2.fill_between(t_hours_plot, M_col, alpha=0.3, color='purple')
     
     plt.tight_layout()
-    plt.show(block=False)  # Non-blocking: allows script to continue
+    plt.show()
     
     # Print results
     avg_Tw = np.mean(Tw_C)
@@ -410,31 +373,18 @@ def plot_results(sol, basin_area):
 # =============================================================================
 
 if __name__ == "__main__":
-    # Run simulation for standard area (1 m²)
-    print("\n" + "="*60)
-    print("RUNNING SIMULATION FOR STANDARD AREA (1 m²)")
-    print("="*60)
-    sol_1m2 = run_simulation(basin_area=1.0)
-    plot_results(sol_1m2, basin_area=1.0)
     
-    # Area optimization: find area needed for 20 kg/day
-    print("\n" + "="*60)
-    print("AREA OPTIMIZATION")
-    print("="*60)
-    A_opt, M_opt = find_area_for_target(target_mass=20.0, A_min=0.1, A_max=30.0)
+    # Run baseline simulation (1 m² area)
+    print("\nRunning baseline simulation (A = 1.0 m²)...")
+    sol_baseline = run_simulation(basin_area=1.0)
+    plot_results(sol_baseline, basin_area=1.0)
+    
+    # Find optimal area for target production
+    target_production = 20.0  # kg/day
+    A_optimal, actual_prod = find_area_for_target(target_production, A_min=0.1, A_max=20.0)
     
     # Run simulation with optimal area
-    if A_opt is not None:
-        print("\n" + "="*60)
-        print(f"RUNNING SIMULATION FOR OPTIMAL AREA ({A_opt:.2f} m²)")
-        print("="*60)
-        sol_opt = run_simulation(basin_area=A_opt)
-        plot_results(sol_opt, basin_area=A_opt)
-    
-    print("\n" + "="*60)
-    print("SIMULATION COMPLETE")
-    print("="*60)
-    
-    # Keep all plot windows open until user closes them
-    plt.show()
-
+    if A_optimal:
+        print(f"\nRunning simulation with optimal area (A = {A_optimal:.2f} m²)...")
+        sol_optimal = run_simulation(basin_area=A_optimal)
+        plot_results(sol_optimal, basin_area=A_optimal)
