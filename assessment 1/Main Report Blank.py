@@ -39,7 +39,7 @@ ALPHA_WATER = 0.85              # Basin absorptivity
 ALPHA_GLASS = 0.05              # Glass absorptivity
 TAU_GLASS = 0.90                # Glass transmittance
 H_GA = 5.0                      # Convective glass-air (W/m²·K)
-ETA_COLL = 1.00                 # Collection efficiency
+ETA_COLL = 0.80                 # Collection efficiency
 
 DT_SEC = 60                     # Timestep (s)
 POLY_ORDER = 3                  # Polynomial regression order
