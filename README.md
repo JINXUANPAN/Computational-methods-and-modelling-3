@@ -46,6 +46,10 @@ pip install numpy scipy matplotlib
 
 Run the scripts in the following order:
 
-python assessment 1/Daily_to_hourly_irradiance_forcer.py
-python assessment 1/Regression (generates file)
-python assessment 1/Root Finding
+python "src/Irradiance Forcer Calculations.py"
+python "src/Main Report.py"
+```
+
+After running these scripts, you will find the generated results and plots in "src/CSV Files and Plots Generated."
+
+
