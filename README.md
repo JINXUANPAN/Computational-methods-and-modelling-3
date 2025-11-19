@@ -34,4 +34,18 @@ predicted water yield matched the demands of the scenario.
 * `docs/`: Project documentation.
 * `data/`: Input datasets (e.g., Algeria solar forecast).
 
+## How to use
+To run the project, please follow these steps:
 
+```Get the code:
+bash
+git clone [https://github.com/JINXUANPAN/Computational-methods-and-modelling-3.git](https://github.com/JINXUANPAN/Computational-methods-and-modelling-3.git)
+  
+Install the required libraries:
+pip install numpy scipy matplotlib
+
+Run the scripts in the following order:
+
+python assessment 1/Daily_to_hourly_irradiance_forcer.py
+python assessment 1/Regression (generates file)
+python assessment 1/Root Finding
