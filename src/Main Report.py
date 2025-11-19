@@ -19,6 +19,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 from scipy.optimize import brentq
+import os
+
+# Get the directory where this script is located
+script_dir = os.path.dirname(os.path.abspath(__file__))
 
 # =============================================================================
 # PHYSICAL CONSTANTS AND GLOBAL PARAMETERS
@@ -48,8 +52,11 @@ POLY_ORDER = 3                  # Polynomial regression order
 T_AMB_C = 30.0                  # Ambient temperature (°C) - CONSTANT
 T_SKY_C = 5.0                   # Sky temperature (°C) - CONSTANT (25K below ambient)
 
-# Configuration
-PERCENTAGE_FILE = "hourly_percentage_irradiance.csv"
+# Configuration - File paths relative to script location
+OUTPUT_DIR = os.path.join(script_dir, "CSV Files and Plots Generated")
+os.makedirs(OUTPUT_DIR, exist_ok=True)  # Create directory if it doesn't exist
+EXCEL_FILE = os.path.join(OUTPUT_DIR, "solar_irradiance_data.xlsx")
+PERCENTAGE_FILE = os.path.join(script_dir, "hourly_percentage_irradiance.csv")
 TOTAL_IRRADIANCE = 3852         # Total daily irradiance (W/m²·day)
 
 # Globals to hold time and irradiance arrays
@@ -65,10 +72,15 @@ poly_func = None
 # =============================================================================
 
 def load_percentage_data(filepath):
-    """Load hourly percentage irradiance data from preprocessed CSV."""
-    df = pd.read_csv(filepath)
+    """Load hourly percentage irradiance data from Excel file."""
+    # Check if file exists
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"Excel file not found: {filepath}")
+    
+    # Read from the "Percentage Distribution" sheet
+    df = pd.read_excel(filepath, sheet_name='Percentage Distribution')
     if not {'Hour', 'Percentage of Daily Total'}.issubset(df.columns):
-        raise ValueError("CSV must contain columns: 'Hour' and 'Percentage of Daily Total'")
+        raise ValueError("Excel sheet must contain columns: 'Hour' and 'Percentage of Daily Total'")
     return df
 
 def compute_hourly_irradiance(df, total_irradiance):
@@ -84,7 +96,11 @@ print("\n" + "="*60)
 print("Loading preprocessed irradiance data...")
 print("="*60)
 
-df_pct = load_percentage_data(PERCENTAGE_FILE)
+# Check if output directory exists
+if not os.path.exists(OUTPUT_DIR):
+    raise FileNotFoundError(f"Output directory not found: {OUTPUT_DIR}. Please run the previous script first.")
+
+df_pct = load_percentage_data(EXCEL_FILE)
 df_irr = compute_hourly_irradiance(df_pct, TOTAL_IRRADIANCE)
 
 print(f"\nHourly Irradiance Estimated from Total = {TOTAL_IRRADIANCE:.0f} W/m²·day")
@@ -96,7 +112,7 @@ print("="*60)
 # REGRESSION MODEL (INTERPOLATING DATA TO FORM CONTINUOUS FUNCTION)
 # =============================================================================
 
-# loading data from CSV file
+# loading data from Excel file
 x = df_irr["Hour_float"].values
 y = df_irr["Estimated Irradiance (W/m2)"].values
 
@@ -125,6 +141,10 @@ plt.ylabel(r"Solar Irradiance (W/m$^2$)")
 plt.title("Continuous irradiance function using regression model")
 plt.legend()
 plt.grid(True)
+# Save plot
+regression_plot_path = os.path.join(OUTPUT_DIR, "01_Solar_Irradiance_Regression.png")
+plt.savefig(regression_plot_path, dpi=300, bbox_inches='tight')
+print(f"Saved: {regression_plot_path}")
 plt.show(block=False)  # Non-blocking: allows script to continue
 
 # Initialize time arrays for simulation
@@ -350,6 +370,10 @@ def find_area_for_target(target_mass=20.0, A_min=0.1, A_max=30.0):
     plt.grid(True, alpha=0.3)
     plt.legend(fontsize=11)
     plt.tight_layout()
+    # Save plot
+    optimization_plot_path = os.path.join(OUTPUT_DIR, "02_Area_Optimization_Curve.png")
+    plt.savefig(optimization_plot_path, dpi=300, bbox_inches='tight')
+    print(f"Saved: {optimization_plot_path}")
     plt.show(block=False)  # Non-blocking: allows script to continue
     
     print(f"Found optimal area: {A_optimal:.3f} m² producing {mass_actual:.3f} kg/day")
@@ -358,6 +382,24 @@ def find_area_for_target(target_mass=20.0, A_min=0.1, A_max=30.0):
 # =============================================================================
 # VISUALIZATION
 # =============================================================================
+
+def print_results(sol, basin_area):
+    """Print simulation results without plotting"""
+    Tw_C, Tg_C, M_col = sol.y
+    avg_Tw = np.mean(Tw_C)
+    avg_Tg = np.mean(Tg_C)
+    total_kg = M_col[-1]
+    per_m2_day = total_kg / basin_area
+    
+    print("\n" + "="*60)
+    print("SIMULATION RESULTS")
+    print("="*60)
+    print(f"Basin area: {basin_area:.2f} m²")
+    print(f"Average water temperature (°C): {avg_Tw:.2f}")
+    print(f"Average glass temperature (°C): {avg_Tg:.2f}")
+    print(f"Total collected water (kg/day): {total_kg:.3f}")
+    print(f"Specific yield (kg/m²·day): {per_m2_day:.3f}")
+    print("="*60 + "\n")
 
 def plot_results(sol, basin_area):
     """Generate temperature and production plots"""
@@ -387,23 +429,11 @@ def plot_results(sol, basin_area):
     ax2.fill_between(t_hours_plot, M_col, alpha=0.3, color='purple')
     
     plt.tight_layout()
+    # Save plot
+    results_plot_path = os.path.join(OUTPUT_DIR, f"03_Temperature_and_Water_Cumulation_{basin_area:.2f}m2.png")
+    plt.savefig(results_plot_path, dpi=300, bbox_inches='tight')
+    print(f"Saved: {results_plot_path}")
     plt.show(block=False)  # Non-blocking: allows script to continue
-    
-    # Print results
-    avg_Tw = np.mean(Tw_C)
-    avg_Tg = np.mean(Tg_C)
-    total_kg = M_col[-1]
-    per_m2_day = total_kg / basin_area
-    
-    print("\n" + "="*60)
-    print("SIMULATION RESULTS")
-    print("="*60)
-    print(f"Basin area: {basin_area:.2f} m²")
-    print(f"Average water temperature (°C): {avg_Tw:.2f}")
-    print(f"Average glass temperature (°C): {avg_Tg:.2f}")
-    print(f"Total collected water (kg/day): {total_kg:.3f}")
-    print(f"Specific yield (kg/m²·day): {per_m2_day:.3f}")
-    print("="*60 + "\n")
 
 # =============================================================================
 # MAIN EXECUTION
@@ -415,7 +445,7 @@ if __name__ == "__main__":
     print("RUNNING SIMULATION FOR STANDARD AREA (1 m²)")
     print("="*60)
     sol_1m2 = run_simulation(basin_area=1.0)
-    plot_results(sol_1m2, basin_area=1.0)
+    print_results(sol_1m2, basin_area=1.0)
     
     # Area optimization: find area needed for 20 kg/day
     print("\n" + "="*60)
@@ -424,17 +454,21 @@ if __name__ == "__main__":
     A_opt, M_opt = find_area_for_target(target_mass=20.0, A_min=0.1, A_max=30.0)
     
     # Run simulation with optimal area
+    sol_opt = None
     if A_opt is not None:
         print("\n" + "="*60)
         print(f"RUNNING SIMULATION FOR OPTIMAL AREA ({A_opt:.2f} m²)")
         print("="*60)
         sol_opt = run_simulation(basin_area=A_opt)
-        plot_results(sol_opt, basin_area=A_opt)
+        print_results(sol_opt, basin_area=A_opt)
     
     print("\n" + "="*60)
-    print("SIMULATION COMPLETE")
+    print("SIMULATION COMPLETE - GENERATING PLOTS")
     print("="*60)
+    
+    # Generate temperature + water cumulation plot after loop completes
+    if sol_opt is not None:
+        plot_results(sol_opt, basin_area=A_opt)
     
     # Keep all plot windows open until user closes them
     plt.show()
-
