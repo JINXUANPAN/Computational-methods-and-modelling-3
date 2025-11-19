@@ -23,6 +23,7 @@ Although these cases are unlikely in practical scenarios, they ensure numerical 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 from scipy.integrate import solve_ivp
 from scipy.optimize import brentq
 
@@ -140,7 +141,8 @@ plt.ylabel(r"Solar Irradiance (W/m$^2$)")
 plt.title("Continuous irradiance function using regression model")
 plt.legend()
 plt.grid(True)
-plt.show()
+plt.show(block=False)  # Non-blocking: allows script to continue
+plt.pause(0.1)  # Small pause to ensure plot renders
 
 # Initialize time arrays for simulation
 t_start_hr = x.min()
@@ -448,7 +450,8 @@ def find_area_for_target(target_mass=20.0, A_min=0.1, A_max=30.0):
     plt.grid(True, alpha=0.3)
     plt.legend(fontsize=11)
     plt.tight_layout()
-    plt.show()
+    plt.show(block=False)  # Non-blocking: allows script to continue
+    plt.pause(0.1)  # Small pause to ensure plot renders
     
     print(f"Found optimal area: {A_optimal:.3f} m² producing {mass_actual:.3f} kg/day")
     return A_optimal, mass_actual
@@ -485,7 +488,8 @@ def plot_results(sol, basin_area):
     ax2.fill_between(t_hours_plot, M_col, alpha=0.3, color='purple')
     
     plt.tight_layout()
-    plt.show()
+    plt.show(block=False)  # Non-blocking: allows script to continue
+    plt.pause(0.1)  # Small pause to ensure plot renders
     
     # Print results
     avg_Tw = np.mean(Tw_C)
@@ -502,3 +506,36 @@ def plot_results(sol, basin_area):
     print(f"Total collected water (kg/day): {total_kg:.3f}")
     print(f"Specific yield (kg/m²·day): {per_m2_day:.3f}")
     print("="*60 + "\n")
+
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
+
+if __name__ == "__main__":
+    # Run simulation for standard area (1 m²)
+    print("\n" + "="*60)
+    print("RUNNING SIMULATION FOR STANDARD AREA (1 m²)")
+    print("="*60)
+    sol_1m2 = run_simulation(basin_area=1.0)
+    plot_results(sol_1m2, basin_area=1.0)
+    
+    # Area optimization: find area needed for 20 kg/day
+    print("\n" + "="*60)
+    print("AREA OPTIMIZATION")
+    print("="*60)
+    A_opt, M_opt = find_area_for_target(target_mass=20.0, A_min=0.1, A_max=30.0)
+    
+    # Run simulation with optimal area
+    if A_opt is not None:
+        print("\n" + "="*60)
+        print(f"RUNNING SIMULATION FOR OPTIMAL AREA ({A_opt:.2f} m²)")
+        print("="*60)
+        sol_opt = run_simulation(basin_area=A_opt)
+        plot_results(sol_opt, basin_area=A_opt)
+    
+    print("\n" + "="*60)
+    print("SIMULATION COMPLETE")
+    print("="*60)
+    
+    # Keep all plot windows open until user closes them
+    plt.show()
