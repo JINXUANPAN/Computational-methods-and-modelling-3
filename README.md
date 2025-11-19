@@ -3,7 +3,7 @@ Computational Methods and Modelling 3 | Group 6 | September - November 2025 | Op
 
 ## Project Overview
 Over 97% of the Earth’s water is saltwater, and with 2.1 billion people across the planet still without access
-to safely managed drinking water. Desalination via solar stills could provide a solution to households faced
+to safely managed drinking water, desalination via solar stills could provide a solution to households faced
 with this issue. This project models the transient thermal behaviour and freshwater production of a single-basin
 passive solar still. Its goal is to optimisie the basin's area to meet the daily freshwater demand for an
 average household in Algeria.
@@ -19,7 +19,8 @@ be utilised in the ODE solver.
 The solar still was described as a system with two lumped thermal nodes, representing the basin water and its
 glass cover. Their heat exchange was modelled by a pair of coupled ordinary differential equations (ODE's), 
 which were solved using the Runge-Kutta 4/5 method, via 'scipy.integrate.solve_ivp'. This method solved for the
-temperatures and evaporation rates of the solar still over a 24 hour period.
+temperatures and evaporation rates of the solar still over a 10 hour period (chosen to represent daylight hours, 
+during which solar irradiance, and therefore evaporation, is significant).
 
 ### Design Optimisation
 To find the minimum basin area required to meet the target water yield, a root finding algorithm was used. Brent's
@@ -50,6 +51,6 @@ python "src/Irradiance Forcer Calculations.py"
 python "src/Main Report.py"
 ```
 
-After running these scripts, you will find the generated results and plots in "src/CSV Files and Plots Generated."
+After running these scripts, you will find the generated results and plots in the folder "src/CSV Files and Plots Generated."
 
 
