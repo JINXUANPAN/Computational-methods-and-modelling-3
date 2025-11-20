@@ -1,16 +1,20 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Solar Still Simulation Framework (Based on Vasava et al., 2023)
+Solar Still Model - Based on Vasava et al. (2023)
+==============================================
+Mathematical modelling matching paper equations with area optimization
 
-This module implements a mathematical model of a solar still derived from the 
-equations in Vasava et al. (2023). Users can input local climate data and 
-system design targets, and the model computes the expected freshwater output. 
-The structure is intentionally general so the model can be applied to various 
-climates and output requirements.
+This module implements a dynamic solar still model based on Vasava et al. (2023).
+It performs the following tasks:
+1. Load hourly solar irradiance data from Excel.
+2. Fit a 3rd-order polynomial regression.
+3. Solve coupled ODEs for Tw, Tg, and M_col.
+4. Perform area optimization for target yield.
+5. Plot temperature profiles and water production.
 
-Note: safeguards are included to prevent division by zero errors in calculations. 
+Note: Safeguards are included to prevent division by zero errors in calculations.
 Although these cases are unlikely in practical scenarios, they ensure numerical stability.
-
-THIS IS THE BLANK VERSION - Ready for custom temperature input methods
 """
 
 # Importing libraries used 
@@ -72,8 +76,26 @@ poly_func = None
 # =============================================================================
 
 def load_percentage_data(filepath):
-    """Load hourly percentage irradiance data from Excel file."""
-    # Check if file exists
+    """
+    Load hourly percentage irradiance data from Excel file.
+    
+    Parameters
+    ----------
+    filepath : str
+        Path to Excel file containing percentage distribution data.
+    
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with 'Hour' and 'Percentage of Daily Total' columns.
+    
+    Raises
+    ------
+    FileNotFoundError
+        If the specified Excel file does not exist.
+    ValueError
+        If required columns are missing from the Excel sheet.
+    """
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"Excel file not found: {filepath}")
     
@@ -84,7 +106,21 @@ def load_percentage_data(filepath):
     return df
 
 def compute_hourly_irradiance(df, total_irradiance):
-    """Apply total daily irradiance to percentage distribution."""
+    """
+    Apply total daily irradiance to percentage distribution.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with hourly percentage data.
+    total_irradiance : float
+        Total daily irradiance (W/m²·day).
+    
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with computed hourly irradiance values.
+    """
     df = df.copy()
     df["Estimated Irradiance (W/m2)"] = (df["Percentage of Daily Total"] / 100) * total_irradiance
     df["Hour_float"] = df["Hour"].apply(lambda x: int(x.split(":")[0]) + int(x.split(":")[1]) / 60)
@@ -112,7 +148,7 @@ print("="*60)
 # REGRESSION MODEL (INTERPOLATING DATA TO FORM CONTINUOUS FUNCTION)
 # =============================================================================
 
-# loading data from Excel file
+# Loading data from Excel file
 x = df_irr["Hour_float"].values
 y = df_irr["Estimated Irradiance (W/m2)"].values
 
@@ -167,25 +203,62 @@ print("="*60)
 # ODE MODEL: SOLAR STILL DYNAMICS (BASED ON PAPER EQUATIONS)
 # =============================================================================
 
-# Saturation pressure (Paper's Equation 9, 10)
 def p_sat(T_celsius):
     """
-    Saturation vapor pressure using paper's equation:
-    P_sat = exp(25.317 - 5144/(T + 273))
+    Compute saturation vapour pressure for water (paper's Eq. 9 & 10).
+    
+    Uses the correlation: P_sat = exp(25.317 - 5144/(T + 273))
+    where T is the water temperature in Celsius.
+    
+    Parameters
+    ----------
+    T_celsius : float or array_like
+        Water temperature in degrees Celsius. Values are clipped
+        to the range [0, 100] °C for numerical stability.
+    
+    Returns
+    -------
+    float or ndarray
+        Saturation vapour pressure (Pa) corresponding to the input temperature.
     """
     T_celsius = np.clip(T_celsius, 0.0, 100.0)
     return np.exp(25.317 - 5144.0 / (T_celsius + 273.0))
 
 # Effective emissivity (Paper's Equation 5)
 def epsilon_eff():
-    """ε_eff = 1 / (1/ε_w + 1/ε_g - 1)"""
+    """
+    Compute effective emissivity between water and glass (paper's Eq. 5).
+    
+    Formula: ε_eff = 1 / (1/ε_w + 1/ε_g - 1)
+    where ε_w and ε_g are water and glass emissivities.
+    
+    Returns
+    -------
+    float
+        Effective emissivity (dimensionless) between water and glass.
+    """
     return 1.0 / (1.0/EPSILON_W + 1.0/EPSILON_G - 1.0)
 
 # Radiative heat transfer coefficient (Paper's Equation 4 - equivalent Kelvin values 
 # introduced for simplicity when using Stefan-Boltzmann)
 def h_r_wg(Tw_C, Tg_C):
     """
-    h_r,w-g = ε_eff × σ[(T_w+273)² + (T_g+273)²] × [(T_w + T_g + 546)]
+    Compute radiative heat transfer coefficient between water and glass (paper's Eq. 4).
+    
+    Formula: h_r,w-g = ε_eff × σ × [(T_w+273)² + (T_g+273)²] × (T_w + T_g + 546)
+    where temperatures are in Celsius before converting to Kelvin.
+    
+    Parameters
+    ----------
+    Tw_C : float
+        Water temperature in degrees Celsius.
+    Tg_C : float
+        Glass temperature in degrees Celsius.
+    
+    Returns
+    -------
+    float
+        Radiative heat transfer coefficient (W/m²·K).
     """
     Tw_K = Tw_C + 273
     Tg_K = Tg_C + 273
@@ -195,23 +268,64 @@ def h_r_wg(Tw_C, Tg_C):
 
 # Helper function for signed cube root (to handle negative values)
 def signed_cuberoot(x):
-    """Returns signed cube root to handle negative temperature differences"""
+    """
+    Compute the signed cube root of ``x``.
+
+    This helper function is used to safely evaluate correlations that
+    require a cube root, while preserving the sign of the input for
+    negative values.
+
+    Parameters
+    ----------
+    x : float or array_like
+        Input value(s) for which the signed cube root is required.
+
+    Returns
+    -------
+    float or ndarray
+        Signed cube root of ``x``, i.e. ``sign(x) * |x|**(1/3)``.
+    """
     return np.sign(x) * (np.abs(x) ** (1.0/3.0))
 
 # Convective heat transfer coefficient (Paper's Equation 8)
 def h_c_wg(Tw_C, Tg_C):
     """
-    h_c,w-g = 0.884 × [(T_w - T_g) + (P_w - P_g)×(T_w+273)/(2.723×10⁴ - P_w)]^(1/3)
+    Compute convective heat transfer coefficient between water and glass (paper's Eq. 8).
+    
+    Formula: h_c,w-g = 0.884 × [(T_w - T_g) + (P_w - P_g) × (T_w+273) / (27230 - P_w)]^(1/3)
+    where P_w and P_g are saturation pressures at water and glass temperatures.
+    
+    If T_w ≤ T_g or the combined term is non-positive, returns minimum value
+    for numerical stability.
+    
+    Parameters
+    ----------
+    Tw_C : float
+        Water temperature in degrees Celsius.
+    Tg_C : float
+        Glass temperature in degrees Celsius.
+    
+    Returns
+    -------
+    h_c : float
+        Convective heat transfer coefficient (W/m²·K).
+    P_w : float
+        Saturation pressure at water temperature (Pa).
+    P_g : float
+        Saturation pressure at glass temperature (Pa).
     """
-    if Tw_C <= Tg_C: # No convection if water temp <= glass temp
+    if Tw_C <= Tg_C:  # No convection if water temp <= glass temp
         return 0.1, p_sat(Tw_C), p_sat(Tg_C)
     
     P_w = p_sat(Tw_C)
     P_g = p_sat(Tg_C)
     
     term1 = Tw_C - Tg_C
-    term2 = (P_w - P_g) * (Tw_C + 273) / (2.7230e4 - P_w + 1e-9) # Avoid division by zero
+    term2 = (P_w - P_g) * (Tw_C + 273) / (2.7230e4 - P_w + 1e-9)  # Avoid division by zero
     combined = term1 + term2
+    
+    if combined <= 0:
+        return 0.1, P_w, P_g
     
     h_c = 0.884 * signed_cuberoot(combined)
     return max(h_c, 0.1), P_w, P_g
@@ -219,29 +333,67 @@ def h_c_wg(Tw_C, Tg_C):
 # Evaporative heat transfer coefficient (Paper's Equation 12)
 def h_e_wg(Tw_C, Tg_C, h_c, P_w, P_g):
     """
-    h_e,w-g = 16.273×10⁻³ × h_c × (P_w - P_g)/(T_w - T_g)
+    Compute evaporative heat transfer coefficient between water and glass (paper's Eq. 12).
+    
+    Formula: h_e,w-g = 16.273×10⁻³ × h_c × (P_w - P_g) / (T_w - T_g)
+    
+    When temperature difference is extremely small, returns 0.0 to avoid
+    division-by-zero issues.
+    
+    Parameters
+    ----------
+    Tw_C : float
+        Water temperature in degrees Celsius.
+    Tg_C : float
+        Glass temperature in degrees Celsius.
+    h_c : float
+        Convective heat transfer coefficient (W/m²·K).
+    P_w : float
+        Saturation pressure at water temperature (Pa).
+    P_g : float
+        Saturation pressure at glass temperature (Pa).
+    
+    Returns
+    -------
+    float
+        Evaporative heat transfer coefficient (W/m²·K).
     """
-    if abs(Tw_C - Tg_C) < 1e-6: # Avoid division by zero
+    if abs(Tw_C - Tg_C) < 1e-6:  # Avoid division by zero
         return 0.0
     h_e = 16.273e-3 * h_c * (P_w - P_g) / (Tw_C - Tg_C)
-    return max(h_e, 0.0) # Ensure non-negative
+    return max(h_e, 0.0)  # Ensure non-negative
 
 # System of ODEs (Paper's Equation 1 and 2)
 def solar_still_odes(t_sec, y, A):
     """
-    Energy balance equations from paper (Equations 1 and 2):
+    Right-hand side of the solar still ODE system (paper's Eq. 1 & 2).
     
-    Water basin:  M_w × C_w × dT_w/dt = α_w×τ_g×I(t) - Q_r,w-g - Q_c,w-g - Q_e,w-g
+    Implements coupled energy balance equations for water and glass,
+    plus cumulative mass of collected water.
     
-    Glass cover:  M_g × C_g × dT_g/dt = α_g×I(t) + Q_r,w-g + Q_c,w-g + Q_e,w-g 
-                                        - Q_r,g-a - Q_c,g-a
+    Energy balances:
+    - Water basin:  M_w × C_w × dT_w/dt = Q_solar - Q_rad - Q_conv - Q_evap
+    - Glass cover:  M_g × C_g × dT_g/dt = Q_solar + Q_rad + Q_conv + Q_evap - Q_losses
+    - Collection:   dM_col/dt = η_coll × m_evap
     
-    Where:
-        Q_r,w-g = h_r,w-g × A × (T_w - T_g)     [Radiative heat transfer, water to glass]
-        Q_c,w-g = h_c,w-g × A × (T_w - T_g)     [Convective heat transfer, water to glass]
-        Q_e,w-g = h_e,w-g × A × (T_w - T_g)     [Evaporative heat transfer, water to glass]
-        Q_r,g-a = ε_g×σ×A×(T_g⁴ - T_sky⁴)       [Radiative heat loss, glass to sky]
-        Q_c,g-a = h_c,g-a × A × (T_g - T_a)     [Convective heat loss, glass to ambient]
+    State vector y contains:
+    - y[0] = T_w : water temperature (°C)
+    - y[1] = T_g : glass temperature (°C)
+    - y[2] = M_col : cumulative collected mass (kg)
+    
+    Parameters
+    ----------
+    t_sec : float
+        Current simulation time in seconds.
+    y : array_like, shape (3,)
+        Current state vector [T_w, T_g, M_col].
+    A : float
+        Basin surface area (m²) used to scale mass and heat fluxes.
+    
+    Returns
+    -------
+    list of float
+        Time derivatives [dT_w/dt, dT_g/dt, dM_col/dt].
     """
     Tw_C, Tg_C, M_col = y  # Temperatures in Celsius
     
@@ -259,7 +411,7 @@ def solar_still_odes(t_sec, y, A):
     T_sky_current = T_SKY_C
     
     # Calculate masses based on area (generalizable for optimization)
-    # Note: area is considered equal for water and glass layers, as difference is considered negligible
+    # Note: area is considered equal for water and glass layers, as difference is negligible
     m_water = RHO_WATER * WATER_DEPTH * A
     m_glass = RHO_GLASS * GLASS_THICKNESS * A
     
@@ -298,7 +450,7 @@ def solar_still_odes(t_sec, y, A):
     # Glass: gains solar + heat from water, loses to ambient via radiation and convection
     dTg_dt = (Q_solar_glass + Q_rad_wg + Q_conv_wg + Q_evap_wg - Q_rad_sky - Q_conv_amb) / Cg
     
-    # Water collection rate (kg/s)
+    # Water collection rate (Equation 11)
     m_dot = Q_evap_wg / L_V
     dMcol_dt = ETA_COLL * max(m_dot, 0.0)
     
@@ -306,7 +458,26 @@ def solar_still_odes(t_sec, y, A):
 
 # Run simulation using RK45 solver
 def run_simulation(basin_area=1.0):
-    """Execute simulation for given basin area"""
+    """
+    Run a time-domain simulation of the solar still for a given basin area.
+    
+    Integrates the ODE system using RK45 method over the pre-defined
+    simulation window. Irradiance time series (G_time) and time grid
+    (t_seconds) must already be defined globally.
+    
+    Parameters
+    ----------
+    basin_area : float, optional
+        Basin surface area in square metres (m²). Default is 1.0 m².
+    
+    Returns
+    -------
+    scipy.integrate.OdeResult
+        Solution object containing:
+        - t : time points in seconds
+        - y : state trajectories [T_w, T_g, M_col]
+        - Solver diagnostics and status flags
+    """
     if G_time is None:
         raise RuntimeError("Irradiance profile not loaded")
     
@@ -332,14 +503,48 @@ def run_simulation(basin_area=1.0):
 # =============================================================================
 
 def production_for_area(basin_area):
-    """Calculate total daily water production for given area"""
+    """
+    Compute total daily water production for a given basin area.
+
+    This is a convenience wrapper that runs a full simulation and returns
+    the final value of the cumulative collected mass component.
+
+    Parameters
+    ----------
+    basin_area : float
+        Basin area in square metres (m²).
+
+    Returns
+    -------
+    float
+        Total mass of water collected over the simulated day (kg).
+    """
     sol = run_simulation(basin_area)
     return sol.y[2][-1]  # Final cumulative mass
 
 def find_area_for_target(target_mass=20.0, A_min=0.1, A_max=30.0):
     """
-    Find basin area required to produce target mass using bisection method.
-    Also plots optimization curve showing production vs. area.
+    Find basin area required to achieve a target daily production.
+    
+    Samples the production curve over a range of areas for visualization,
+    then uses Brent's method (scipy.optimize.brentq) to find the area
+    that yields the target mass per day.
+    
+    Parameters
+    ----------
+    target_mass : float, optional
+        Target daily production in kilograms. Default is 20.0 kg/day.
+    A_min : float, optional
+        Minimum basin area (m²) as lower bound. Default is 0.1 m².
+    A_max : float, optional
+        Maximum basin area (m²) as upper bound. Default is 30.0 m².
+    
+    Returns
+    -------
+    A_optimal : float or None
+        Optimal basin area (m²) that achieves target, or None if optimization fails.
+    mass_actual : float or None
+        Actual mass (kg/day) produced at A_optimal, or None on failure.
     """
     def objective(A):
         return production_for_area(A) - target_mass
@@ -384,7 +589,16 @@ def find_area_for_target(target_mass=20.0, A_min=0.1, A_max=30.0):
 # =============================================================================
 
 def print_results(sol, basin_area):
-    """Print simulation results without plotting"""
+    """
+    Print simulation results summary.
+    
+    Parameters
+    ----------
+    sol : scipy.integrate.OdeResult
+        Solution object returned by :func:`run_simulation`.
+    basin_area : float
+        Basin surface area in square metres (m²).
+    """
     Tw_C, Tg_C, M_col = sol.y
     avg_Tw = np.mean(Tw_C)
     avg_Tg = np.mean(Tg_C)
@@ -402,11 +616,31 @@ def print_results(sol, basin_area):
     print("="*60 + "\n")
 
 def plot_results(sol, basin_area):
-    """Generate temperature and production plots"""
+    """
+    Plot temperature profiles and cumulative water production.
+    
+    Generates two subplots:
+    1. Water and glass temperatures vs. time (with ambient and sky temperatures)
+    2. Cumulative collected water mass vs. time
+    
+    The plot is saved to the output directory and displayed.
+    
+    Parameters
+    ----------
+    sol : scipy.integrate.OdeResult
+        Solution object from run_simulation() containing state trajectories.
+    basin_area : float
+        Basin surface area (m²) for this simulation run.
+    
+    Returns
+    -------
+    None
+        Function produces and saves plots but returns nothing.
+    """
     Tw_C, Tg_C, M_col = sol.y
     t_hours_plot = sol.t / 3600
     
-    # Figure 1: Temperature profiles and cumulative production
+    # Figure: Temperature profiles and cumulative production
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
     
     ax1.plot(t_hours_plot, Tw_C, 'r-', label='Water Temperature', linewidth=2)
