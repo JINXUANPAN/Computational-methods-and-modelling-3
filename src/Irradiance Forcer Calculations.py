@@ -1,3 +1,21 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Solar Irradiance Data Processor
+================================
+Processes historical solar irradiance data and generates percentage distributions.
+
+This script performs the following tasks:
+1. Extracts and cleans solar irradiance data from raw CSV files.
+2. Calculates hourly average irradiance values.
+3. Computes percentage distribution of daily total irradiance.
+4. Generates visualization plots and Excel output files.
+5. Estimates hourly irradiance from a given daily total.
+
+The processed data is saved in an organized output directory for use
+in subsequent solar still modeling simulations.
+"""
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,33 +26,37 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Set the file path relative to the script location
 file_path = os.path.join(script_dir, 'solar.csv')
-DUMMY_YEAR = 2024 # Used to help Python parse dates that are missing a year #
+DUMMY_YEAR = 2024  # Used to help Python parse dates that are missing a year
 
 # Create output directory in the same location as the script
 output_dir = os.path.join(script_dir, "CSV Files and Plots Generated")
 os.makedirs(output_dir, exist_ok=True)  # Create directory if it doesn't exist
 
-# Read the raw data without a header for processing #
+# Read the raw data without a header for processing
 df_raw = pd.read_csv(file_path, header=None)
 
 data_list = []
 current_date_str = None
-month_names = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+month_names = ['January', 'February', 'March', 'April', 'May', 'June', 
+               'July', 'August', 'September', 'October', 'November', 'December']
 
-# Clean and extract historical solar data #
+# =============================================================================
+# DATA EXTRACTION AND CLEANING
+# =============================================================================
+
 print("Starting data extraction and cleaning...")
 
 for index, row in df_raw.iterrows():
     col_a = row.iloc[0]
     col_b = row.iloc[1]
 
-    # Date Detection #
+    # Date Detection - identify rows containing date information
     if pd.notna(col_a) and isinstance(col_a, str):
         if any(month in col_a for month in month_names):
             current_date_str = col_a.split(',')[0].strip()
             continue
 
-    # Data Row Detection #
+    # Data Row Detection - extract time and irradiance values
     if current_date_str and pd.notna(col_a) and isinstance(col_a, str) and ':' in col_a:
         try:
             irradiance = pd.to_numeric(col_b, errors='coerce')
@@ -47,54 +69,96 @@ for index, row in df_raw.iterrows():
         except:
             continue
 
-# Create the final cleaned database #
+# Create the final cleaned database
 df_cleaned = pd.DataFrame(data_list)
 
 if df_cleaned.empty:
     print("Error: No solar irradiance data was extracted. Check the CSV format.")
-    # Exit or raise error, as subsequent steps will fail without data
     exit()
 
-# Final database preparations #
+# Final database preparations - parse dates and sort chronologically
 date_format = '%A %B %d %Y %H:%M'
 df_cleaned['DateTime'] = pd.to_datetime(df_cleaned['DateTime'], format=date_format, errors='coerce')
 df_forecast = df_cleaned.set_index('DateTime')
 df_forecast = df_forecast[df_forecast.index.notna()]
 df_forecast = df_forecast.sort_index()
 
-# Sort hours by time #
+# =============================================================================
+# HOURLY AVERAGING AND PERCENTAGE CALCULATIONS
+# =============================================================================
+
 def time_to_seconds(time_str):
+    """
+    Convert time string to seconds since midnight.
+    
+    Used for sorting hourly data in chronological order.
+    
+    Parameters
+    ----------
+    time_str : str
+        Time in 'HH:MM' format (e.g., '14:30').
+    
+    Returns
+    -------
+    int
+        Number of seconds since midnight.
+    """
     h, m = map(int, time_str.split(':'))
     return h * 3600 + m * 60
 
-# Calculate Hourly Average and Percentage Distribution #
+# Calculate hourly average irradiance
 df_forecast['Hour_of_Day'] = df_forecast.index.strftime('%H:%M')
 df_hourly_avg = df_forecast.groupby('Hour_of_Day')['Solar_Irradiance_W_m2'].mean().reset_index()
 df_hourly_avg.columns = ['Hour', 'Average Irradiance (W/m2)']
 
-# Sort table #
+# Sort table chronologically
 df_hourly_avg = df_hourly_avg.assign(Time_Sort=df_hourly_avg['Hour'].apply(time_to_seconds))
 df_hourly_avg = df_hourly_avg.sort_values('Time_Sort').drop(columns=['Time_Sort'])
 
-# Calculate Percentage of Daily Total #
+# Calculate percentage of daily total
 total_daily_avg = df_hourly_avg['Average Irradiance (W/m2)'].sum()
 df_hourly_avg['Percentage of Daily Total'] = (df_hourly_avg['Average Irradiance (W/m2)'] / total_daily_avg) * 100
 
-# 🛑 CHANGE THIS VALUE 🛑 to the input total daily irradiance 
-DAILY_TOTAL = 4000 # Example: 4000 W/m2 total for the day
+# Daily total irradiance input determined from a datasource 
+DAILY_TOTAL = 4600  # Example: 4000 W/m² total for the day
 
-# Create a new column applying the percentage distribution #
+# Create a new column applying the percentage distribution
 df_hourly_avg['Estimated Irradiance (W/m2)'] = (df_hourly_avg['Percentage of Daily Total'] / 100) * DAILY_TOTAL
 
 # Display the estimated results
 print("\n" + "="*60)
-print(f"--- Hourly Irradiance Estimated from a Daily Total of {DAILY_TOTAL:.2f} W/m2 ---")
+print(f"--- Hourly Irradiance Estimated from a Daily Total of {DAILY_TOTAL:.2f} W/m² ---")
 print("="*60)
 print(df_hourly_avg[['Hour', 'Percentage of Daily Total', 'Estimated Irradiance (W/m2)']].to_string(index=False, float_format='%.2f'))
 print("="*60)
 
-# Create combined plot with subplots
+# =============================================================================
+# VISUALIZATION FUNCTIONS
+# =============================================================================
+
 def create_combined_plot(df, filename):
+    """
+    Create a combined plot with two subplots showing irradiance data.
+    
+    Generates a figure with:
+    1. Bar chart of average hourly irradiance (W/m²)
+    2. Bar chart of percentage distribution across the day
+    
+    The plot is saved to the output directory as a high-resolution PNG.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing columns: 'Hour', 'Average Irradiance (W/m2)', 
+        and 'Percentage of Daily Total'.
+    filename : str
+        Output filename for the saved plot (e.g., 'plot.png').
+    
+    Returns
+    -------
+    None
+        Function saves the plot but returns nothing.
+    """
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
     
     # Plot 1: Average Irradiance
@@ -110,7 +174,7 @@ def create_combined_plot(df, filename):
     ax2.set_title('Percentage of Daily Average Irradiance by Hour')
     ax2.grid(axis='y', linestyle='--', alpha=0.7)
     
-    # Set x-ticks for both subplots
+    # Set x-ticks for both subplots (every 2 hours for readability)
     hours = df['Hour'].tolist()
     tick_indices = range(0, len(hours), 2)
     tick_labels = [hours[i] for i in tick_indices]
@@ -128,8 +192,27 @@ def create_combined_plot(df, filename):
     plt.savefig(os.path.join(output_dir, filename), dpi=300, bbox_inches='tight')
     print(f"Combined plot saved as: {os.path.join(output_dir, filename)}")
 
-# Function to auto-fit column widths in Excel
+# =============================================================================
+# EXCEL FILE GENERATION
+# =============================================================================
+
 def auto_fit_columns(worksheet):
+    """
+    Automatically adjust column widths in an Excel worksheet to fit content.
+    
+    Iterates through all columns and sets width based on the maximum
+    length of cell content in each column.
+    
+    Parameters
+    ----------
+    worksheet : openpyxl.worksheet.worksheet.Worksheet
+        Excel worksheet object to adjust.
+    
+    Returns
+    -------
+    None
+        Function modifies the worksheet in place.
+    """
     for column in worksheet.columns:
         max_length = 0
         column_letter = column[0].column_letter
@@ -142,8 +225,32 @@ def auto_fit_columns(worksheet):
         adjusted_width = (max_length + 2) * 1.2
         worksheet.column_dimensions[column_letter].width = adjusted_width
 
-# Generate combined Excel file with multiple sheets and auto-fitted columns
 def create_excel_file(df, filename):
+    """
+    Generate an Excel file with multiple sheets containing processed data.
+    
+    Creates an Excel workbook with four sheets:
+    1. Complete Data - all columns combined
+    2. Average Irradiance - hourly averages only
+    3. Percentage Distribution - percentage breakdown only
+    4. Estimated Irradiance - estimated values from daily total
+    
+    All columns are automatically sized to fit content.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing all processed irradiance data with columns:
+        'Hour', 'Average Irradiance (W/m2)', 'Percentage of Daily Total',
+        and 'Estimated Irradiance (W/m2)'.
+    filename : str
+        Output filename for the Excel file (e.g., 'data.xlsx').
+    
+    Returns
+    -------
+    None
+        Function creates and saves the Excel file but returns nothing.
+    """
     excel_path = os.path.join(output_dir, filename)
     
     with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
@@ -167,7 +274,9 @@ def create_excel_file(df, filename):
     
     print(f"Excel file with auto-fitted columns saved as: {excel_path}")
 
-# Generate files in the output directory
+# =============================================================================
+# MAIN EXECUTION - GENERATE OUTPUT FILES
+# =============================================================================
 
 # Create combined plot
 create_combined_plot(df_hourly_avg, 'combined_solar_irradiance_plots.png')
