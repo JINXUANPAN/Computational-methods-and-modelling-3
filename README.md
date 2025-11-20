@@ -29,9 +29,9 @@ predicted water yield matched the demands of the scenario.
 
 ## Project Structure
 * `src/`: Contains the source code for the models.
-    * `regression.py`: Handles the solar irradiance data fitting.
-    * `ode_solver.py`: Defines the energy balance equations and Runge-Kutta 4/5 solver.
-    * `optimization.py`: Implements Brent's method for area sizing.
+    * `irradiance_forcing_calculations.py`: creates the necessary irradiance forcer required for ODE simulations.
+    * `main.py`: Implements the energy-balance equations, a Runge–Kutta 4/5 solver, and a Brent-method root-finding loop to optimise the required area.
+    * `solar.csv`: Hourly forecast dataset
 * `docs/`: Project documentation.
 * `data/`: Input datasets (e.g., Algeria solar forecast).
 
