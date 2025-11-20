@@ -47,8 +47,8 @@ pip install numpy scipy matplotlib
 
 Run the scripts in the following order:
 
-python "src/Irradiance Forcer Calculations.py"
-python "src/Main Report.py"
+python "src/irradiance_forcing_calculations.py"
+python "src/main.py"
 ```
 
 After running these scripts, you will find the generated results and plots in the folder "src/CSV Files and Plots Generated."
