@@ -183,7 +183,7 @@ plt.savefig(regression_plot_path, dpi=300, bbox_inches='tight')
 print(f"Saved: {regression_plot_path}")
 plt.show(block=False)  # Non-blocking: allows script to continue
 
-# Initialize time arrays for simulation
+# Initialise time arrays for simulation
 t_start_hr = x.min()
 t_end_hr = x.max()
 t_hours = np.arange(t_start_hr, t_end_hr + DT_SEC/3600, DT_SEC/3600)
@@ -410,7 +410,7 @@ def solar_still_odes(t_sec, y, A):
     T_amb_current = T_AMB_C
     T_sky_current = T_SKY_C
     
-    # Calculate masses based on area (generalizable for optimization)
+    # Calculate masses based on area (generalisable for optimisation)
     # Note: area is considered equal for water and glass layers, as difference is negligible
     m_water = RHO_WATER * WATER_DEPTH * A
     m_glass = RHO_GLASS * GLASS_THICKNESS * A
@@ -499,7 +499,7 @@ def run_simulation(basin_area=1.0):
     return sol
 
 # =============================================================================
-# AREA OPTIMIZATION
+# AREA OPTIMISATION
 # =============================================================================
 
 def production_for_area(basin_area):
@@ -522,18 +522,18 @@ def production_for_area(basin_area):
     sol = run_simulation(basin_area)
     return sol.y[2][-1]  # Final cumulative mass
 
-def find_area_for_target(target_mass=20.0, A_min=0.1, A_max=30.0):
+def find_area_for_target(target_mass, A_min, A_max):
     """
     Find basin area required to achieve a target daily production.
     
-    Samples the production curve over a range of areas for visualization,
+    Samples the production curve over a range of areas for visualisation,
     then uses Brent's method (scipy.optimize.brentq) to find the area
     that yields the target mass per day.
     
     Parameters
     ----------
     target_mass : float, optional
-        Target daily production in kilograms. Default is 20.0 kg/day.
+        Target daily production in kilograms. 
     A_min : float, optional
         Minimum basin area (m²) as lower bound. Default is 0.1 m².
     A_max : float, optional
@@ -560,10 +560,10 @@ def find_area_for_target(target_mass=20.0, A_min=0.1, A_max=30.0):
         A_optimal = brentq(objective, A_min, A_max, xtol=1e-3, rtol=1e-3)
         mass_actual = production_for_area(A_optimal)
     except Exception as e:
-        print("Optimization failed:", e)
+        print("Optimisation failed:", e)
         return None, None
     
-    # Plot optimization curve
+    # Plot optimisation curve
     plt.figure(figsize=(10, 6))
     plt.plot(trial_As, trial_Ms, "o-", linewidth=2, label="Production curve")
     plt.axhline(target_mass, color="r", linestyle="--", linewidth=2, label=f"Target: {target_mass} kg/day")
@@ -571,21 +571,21 @@ def find_area_for_target(target_mass=20.0, A_min=0.1, A_max=30.0):
     plt.plot(A_optimal, mass_actual, 'go', markersize=12, markeredgewidth=2)
     plt.xlabel("Basin Area (m²)", fontsize=12)
     plt.ylabel("Daily Water Production (kg)", fontsize=12)
-    plt.title("Area Optimization: Production vs. Basin Area", fontsize=14, fontweight='bold')
+    plt.title("Area Optimisation: Production vs. Basin Area", fontsize=14, fontweight='bold')
     plt.grid(True, alpha=0.3)
     plt.legend(fontsize=11)
     plt.tight_layout()
     # Save plot
-    optimization_plot_path = os.path.join(OUTPUT_DIR, "02_Area_Optimization_Curve.png")
-    plt.savefig(optimization_plot_path, dpi=300, bbox_inches='tight')
-    print(f"Saved: {optimization_plot_path}")
+    optimisation_plot_path = os.path.join(OUTPUT_DIR, "02_Area_Optimisation_Curve.png")
+    plt.savefig(optimisation_plot_path, dpi=300, bbox_inches='tight')
+    print(f"Saved: {optimisation_plot_path}")
     plt.show(block=False)  # Non-blocking: allows script to continue
     
     print(f"Found optimal area: {A_optimal:.3f} m² producing {mass_actual:.3f} kg/day")
     return A_optimal, mass_actual
 
 # =============================================================================
-# VISUALIZATION
+# VISUALISATION
 # =============================================================================
 
 def print_results(sol, basin_area):
@@ -681,11 +681,11 @@ if __name__ == "__main__":
     sol_1m2 = run_simulation(basin_area=1.0)
     print_results(sol_1m2, basin_area=1.0)
     
-    # Area optimization: find area needed for 20 kg/day
+    # Area optimisation: find area needed for 24 kg/day
     print("\n" + "="*60)
-    print("AREA OPTIMIZATION")
+    print("AREA OPTIMISATION")
     print("="*60)
-    A_opt, M_opt = find_area_for_target(target_mass=20.0, A_min=0.1, A_max=30.0)
+    A_opt, M_opt = find_area_for_target(target_mass=24.0, A_min=0.1, A_max=30.0)
     
     # Run simulation with optimal area
     sol_opt = None
@@ -697,7 +697,7 @@ if __name__ == "__main__":
         print_results(sol_opt, basin_area=A_opt)
     
     print("\n" + "="*60)
-    print("SIMULATION COMPLETE - GENERATING PLOTS")
+    print("SIMULATION COMPLETE - FORMING PLOTS")
     print("="*60)
     
     # Generate temperature + water cumulation plot after loop completes
